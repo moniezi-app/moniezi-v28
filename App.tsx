@@ -656,6 +656,17 @@ const DateInput = ({ label, value, onChange }: { label: string, value: string, o
 const Drawer: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode }> = ({ isOpen, onClose, title, children }) => {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
+  const dismissKeyboardIfBackgroundTap = (e: React.PointerEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('input, textarea, select, button, a, label, [role="button"], [data-keep-focus]')) return;
+
+    const active = document.activeElement as HTMLElement | null;
+    if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) {
+      active.blur();
+    }
+  };
+
   // iOS keyboard scroll-into-view fix:
   // When body is position:fixed (modal-open), iOS can't auto-scroll inputs into view.
   // We manually scroll the drawer's scroll area so the focused input is visible.
@@ -670,27 +681,23 @@ const Drawer: React.FC<{ isOpen: boolean; onClose: () => void; title: string; ch
       const tag = target.tagName.toLowerCase();
       if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
 
-      // Delay to let iOS keyboard finish animating open (~400ms)
-      const timerId = setTimeout(() => {
+      // Delay slightly to let iOS finish opening the keyboard before measuring
+      window.setTimeout(() => {
         if (!scrollArea.contains(target)) return;
 
-        // Use visualViewport to detect keyboard presence and available height
         const viewportHeight = window.visualViewport?.height || window.innerHeight;
         const targetRect = target.getBoundingClientRect();
         const scrollAreaRect = scrollArea.getBoundingClientRect();
 
-        // Calculate where the target is relative to the visible area
-        // We want the input to be roughly 40% from the top of visible area
-        const desiredTop = viewportHeight * 0.35;
-        const currentTop = targetRect.top;
-        const diff = currentTop - desiredTop;
+        const visibleTop = Math.max(scrollAreaRect.top + 16, 92);
+        const visibleBottom = Math.min(scrollAreaRect.bottom, viewportHeight) - 16;
 
-        if (diff > 20 || targetRect.bottom > viewportHeight - 10) {
-          scrollArea.scrollBy({ top: diff, behavior: 'smooth' });
+        if (targetRect.bottom > visibleBottom) {
+          scrollArea.scrollBy({ top: targetRect.bottom - visibleBottom, behavior: 'smooth' });
+        } else if (targetRect.top < visibleTop) {
+          scrollArea.scrollBy({ top: targetRect.top - visibleTop, behavior: 'smooth' });
         }
-      }, 420);
-
-      return () => clearTimeout(timerId);
+      }, 260);
     };
 
     scrollArea.addEventListener('focusin', handleFocus, { passive: true });
@@ -718,7 +725,12 @@ const Drawer: React.FC<{ isOpen: boolean; onClose: () => void; title: string; ch
             <X size={28} strokeWidth={1.5} />
           </button>
         </div>
-        <div ref={scrollAreaRef} className="drawer-scroll-area px-4 sm:px-8 pb-8 modal-scroll-area custom-scrollbar" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 2rem)' }}>
+        <div
+          ref={scrollAreaRef}
+          onPointerDownCapture={dismissKeyboardIfBackgroundTap}
+          className="drawer-scroll-area px-4 sm:px-8 pb-8 modal-scroll-area custom-scrollbar"
+          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 2rem + var(--moniezi-keyboard-inset, 0px))' }}
+        >
           {children}
         </div>
       </div>
@@ -1012,14 +1024,36 @@ export default function App() {
 
     const updateViewportVars = () => {
       const vv = window.visualViewport;
-      const height = vv?.height || window.innerHeight;
-      const offsetTop = vv?.offsetTop || 0;
+      const currentWindowHeight = window.innerHeight;
 
-      document.documentElement.style.setProperty('--moniezi-app-vh', `${height * 0.01}px`);
+      if (!stableAppHeightRef.current) {
+        stableAppHeightRef.current = currentWindowHeight;
+      }
+
+      const visualHeight = vv?.height || currentWindowHeight;
+      const visualOffsetTop = vv?.offsetTop || 0;
+
+      let keyboardInset = isAppleMobile
+        ? Math.max(0, Math.round(stableAppHeightRef.current - (visualHeight + visualOffsetTop)))
+        : 0;
+
+      if (!isAppleMobile || keyboardInset < 120) {
+        stableAppHeightRef.current = currentWindowHeight;
+        keyboardInset = isAppleMobile
+          ? Math.max(0, Math.round(stableAppHeightRef.current - (visualHeight + visualOffsetTop)))
+          : 0;
+      }
+
+      const shellHeight = isAppleMobile ? stableAppHeightRef.current : currentWindowHeight;
+
+      document.documentElement.style.setProperty('--moniezi-app-vh', `${shellHeight * 0.01}px`);
+      document.documentElement.style.setProperty('--moniezi-keyboard-inset', `${keyboardInset}px`);
       document.documentElement.style.setProperty(
         '--moniezi-ios-top-pad',
-        isAppleMobile ? `${Math.max(16, Math.round(offsetTop + 16))}px` : '0px'
+        isAppleMobile ? `${Math.max(16, Math.round(visualOffsetTop + 16))}px` : '0px'
       );
+
+      setIsVirtualKeyboardOpen(isAppleMobile && keyboardInset >= 120);
 
       if (isAppleMobile) {
         document.documentElement.scrollLeft = 0;
@@ -1159,6 +1193,8 @@ export default function App() {
   const [showIosInstallCta, setShowIosInstallCta] = useState(false);
   const [showIosInstallHelp, setShowIosInstallHelp] = useState(false);
   const [isRunningStandalone, setIsRunningStandalone] = useState(false);
+  const [isVirtualKeyboardOpen, setIsVirtualKeyboardOpen] = useState(false);
+  const stableAppHeightRef = useRef(typeof window !== 'undefined' ? window.innerHeight : 0);
 
   const getIosInstallContext = useCallback(() => {
     try {
@@ -1200,6 +1236,17 @@ export default function App() {
 
   const openIosInstallHelp = useCallback(() => {
     setShowIosInstallHelp(true);
+  }, []);
+
+  const dismissKeyboardIfBackgroundTap = useCallback((e: React.PointerEvent<HTMLElement>) => {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('input, textarea, select, button, a, label, [role="button"], [data-keep-focus]')) return;
+
+    const active = document.activeElement as HTMLElement | null;
+    if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) {
+      active.blur();
+    }
   }, []);
 
   // Always reset scroll position when switching bottom tabs.
@@ -2073,17 +2120,22 @@ export default function App() {
       const tag = target.tagName.toLowerCase();
       if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
 
-      // Delay to allow iOS keyboard animation to finish
-      setTimeout(() => {
+      // Delay slightly so iOS finishes the keyboard animation before we measure
+      window.setTimeout(() => {
         if (!scrollArea.contains(target)) return;
+
         const viewportHeight = window.visualViewport?.height || window.innerHeight;
         const targetRect = target.getBoundingClientRect();
-        const desiredTop = viewportHeight * 0.35;
-        const diff = targetRect.top - desiredTop;
-        if (diff > 20 || targetRect.bottom > viewportHeight - 10) {
-          scrollArea.scrollBy({ top: diff, behavior: 'smooth' });
+        const scrollAreaRect = scrollArea.getBoundingClientRect();
+        const visibleTop = Math.max(scrollAreaRect.top + 16, 92);
+        const visibleBottom = Math.min(scrollAreaRect.bottom, viewportHeight) - 16;
+
+        if (targetRect.bottom > visibleBottom) {
+          scrollArea.scrollBy({ top: targetRect.bottom - visibleBottom, behavior: 'smooth' });
+        } else if (targetRect.top < visibleTop) {
+          scrollArea.scrollBy({ top: targetRect.top - visibleTop, behavior: 'smooth' });
         }
-      }, 420);
+      }, 260);
     };
 
     scrollArea.addEventListener('focusin', handleFocus, { passive: true });
@@ -7113,7 +7165,14 @@ html, body, #root {
         </div>
       </header>
 
-      <div key={`main-scroll-${currentPage}`} ref={mainScrollRef} className="main-scroll-lock flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 md:px-8 pt-5 sm:pt-6 md:pt-7 no-print custom-scrollbar" style={{ paddingBottom: 'calc(11rem + env(safe-area-inset-bottom, 0px))' }} role="main">
+      <div
+        key={`main-scroll-${currentPage}`}
+        ref={mainScrollRef}
+        onPointerDownCapture={dismissKeyboardIfBackgroundTap}
+        className="main-scroll-lock flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 md:px-8 pt-5 sm:pt-6 md:pt-7 no-print custom-scrollbar"
+        style={{ paddingBottom: 'calc(11rem + env(safe-area-inset-bottom, 0px) + var(--moniezi-keyboard-inset, 0px))' }}
+        role="main"
+      >
 
       <PageErrorBoundary key={currentPage} onReset={() => setCurrentPage(Page.Dashboard)}>
 
@@ -10379,7 +10438,7 @@ html, body, #root {
       </div>
 
       {/* Scroll to Top Button - rendered via Portal to escape overflow-hidden container */}
-      {showScrollToTop && createPortal(
+      {showScrollToTop && !isVirtualKeyboardOpen && createPortal(
         <button
           onClick={scrollToTop}
           className="no-print w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg shadow-slate-900/10 dark:shadow-black/30 hover:shadow-xl hover:scale-105"
@@ -10486,6 +10545,7 @@ html, body, #root {
         </div>
       )}
 
+      {!isVirtualKeyboardOpen && (
       <div className="dark-chrome no-print fixed bottom-0 left-0 right-0 z-[55] pb-safe">
         <div className={`${useDarkChrome ? 'bg-slate-950 border-t border-slate-800/50' : 'bg-white/95 dark:bg-slate-950/95 border-t border-slate-200 dark:border-slate-800/50'} ${useDarkChrome ? '' : 'backdrop-blur-xl'} px-1 pt-2 pb-3`}>
           <div className="max-w-xl mx-auto flex justify-between items-end relative">
@@ -10575,6 +10635,7 @@ html, body, #root {
           </div>
         </div>
       </div>
+      )}
       
 
       {/* Insights Modal */}
