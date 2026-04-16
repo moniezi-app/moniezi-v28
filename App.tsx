@@ -1468,11 +1468,13 @@ export default function App() {
   const [auditMissingReceipts, setAuditMissingReceipts] = useState<number | null>(null);
   const [auditMissingDelta, setAuditMissingDelta] = useState<number>(0);
   const [auditMissingPulse, setAuditMissingPulse] = useState<boolean>(false);
-  const [newTrip, setNewTrip] = useState<any>({ date: new Date().toISOString().split('T')[0], miles: '', purpose: '', client: '', notes: '' });
+  const createEmptyMileageDraft = useCallback(() => ({ date: new Date().toISOString().split('T')[0], miles: '', purpose: '', client: '', notes: '' }), []);
+  const [newTrip, setNewTrip] = useState<any>(() => createEmptyMileageDraft());
   const taxSnapshotRef = useRef<HTMLDivElement>(null);
 
   // Reports screen menu (Settings-style tiles)
   const [reportsMenuSection, setReportsMenuSection] = useState<'pl'|'taxsnapshot'|'taxprep'|'mileage'|'planner'>('pl');
+  const isMileageKeyboardEditing = isKeyboardEditing && currentPage === Page.Mileage;
   const scrollToReportSection = (id: string, section: typeof reportsMenuSection) => {
     setReportsMenuSection(section);
     const el = document.getElementById(id);
@@ -3331,7 +3333,11 @@ export default function App() {
     }
 
     if (action === 'mileage') {
+      setNewTrip(createEmptyMileageDraft());
       setCurrentPage(Page.Mileage);
+      requestAnimationFrame(() => {
+        forceResetMainViewport();
+      });
       return;
     }
 
@@ -4009,8 +4015,9 @@ const demoMileageTrips: MileageTrip[] = [
     if (!trip.date) return showToast('Please select a date', 'error');
     if (!trip.purpose?.trim()) return showToast('Please enter a purpose', 'error');
     if (!trip.miles || Number(trip.miles) <= 0) return showToast('Please enter valid miles', 'error');
-    const newTrip: MileageTrip = { id: generateId('mi'), ...trip, miles: Number(trip.miles) };
-    setMileageTrips(prev => [newTrip, ...prev]);
+    const newTripEntry: MileageTrip = { id: generateId('mi'), ...trip, miles: Number(trip.miles) };
+    setMileageTrips(prev => [newTripEntry, ...prev]);
+    setNewTrip(createEmptyMileageDraft());
     showToast('Mileage trip saved', 'success');
   };
 
@@ -8035,32 +8042,36 @@ html, body, #root {
               <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 dark:text-white font-brand">Mileage</h2>
             </div>
 
-            <p className="text-slate-600 dark:text-slate-300 font-semibold mb-3">
-              Log trips daily and export IRS-ready mileage for tax time.
-            </p>
+            {!isMileageKeyboardEditing && (
+              <p className="text-slate-600 dark:text-slate-300 font-semibold mb-3">
+                Log trips daily and export IRS-ready mileage for tax time.
+              </p>
+            )}
 
             {/* Mileage Tracker (promoted to its own bottom-tab page) */}
-            <div className="flex-1 min-h-0 bg-white dark:bg-slate-950 p-5 sm:p-8 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xl">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div>
-                  <h3 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white">Mileage</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Track deductible trips and export clean CSV or spreadsheet files for your accountant.</p>
-                </div>
-                <div className="w-full lg:w-auto flex flex-col gap-2">
-                  <div className="w-full sm:w-[140px]">
-                    <label className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1 block">Tax Year</label>
-                    <select value={taxPrepYear} onChange={e => setTaxPrepYear(Number(e.target.value))} className="w-full px-3 py-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm font-bold">
-                      {[2026, 2025, 2024, 2023].map(y => (<option key={y} value={y}>{y}</option>))}
-                    </select>
+            <div className={`flex-1 min-h-0 bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xl transition-all duration-150 ${isMileageKeyboardEditing ? 'p-4 sm:p-5' : 'p-5 sm:p-8'}`}>
+              {!isMileageKeyboardEditing && (
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white">Mileage</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Track deductible trips and export clean CSV or spreadsheet files for your accountant.</p>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button onClick={handleExportMileageSpreadsheet} className={`${exportButtonTonalClass} w-full text-center`}>Export Mileage Spreadsheet</button>
-                    <button onClick={handleExportMileageCSV} className={`${exportButtonUtilityClass} w-full text-center`}>Export Mileage CSV</button>
+                  <div className="w-full lg:w-auto flex flex-col gap-2">
+                    <div className="w-full sm:w-[140px]">
+                      <label className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1 block">Tax Year</label>
+                      <select value={taxPrepYear} onChange={e => setTaxPrepYear(Number(e.target.value))} className="w-full px-3 py-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm font-bold">
+                        {[2026, 2025, 2024, 2023].map(y => (<option key={y} value={y}>{y}</option>))}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button onClick={handleExportMileageSpreadsheet} className={`${exportButtonTonalClass} w-full text-center`}>Export Mileage Spreadsheet</button>
+                      <button onClick={handleExportMileageCSV} className={`${exportButtonUtilityClass} w-full text-center`}>Export Mileage CSV</button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
-              <div className="mt-6 grid grid-cols-1 md:grid-cols-8 gap-3 items-end">
+              <div className={`${isMileageKeyboardEditing ? 'mt-0' : 'mt-6'} grid grid-cols-1 md:grid-cols-8 gap-3 items-end`}>
                 <div className="md:col-span-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-2 block">Date</label>
                   <input type="date" value={newTrip.date} onChange={e => setNewTrip((p: any) => ({ ...p, date: e.target.value }))} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-sm font-bold" />
@@ -8088,8 +8099,9 @@ html, body, #root {
                 </div>
               </div>
 
-              <div className="mt-6 overflow-x-auto">
-                <table className="min-w-full text-sm">
+              {!isMileageKeyboardEditing && (
+                <div className="mt-6 overflow-x-auto">
+                  <table className="min-w-full text-sm">
                   <thead>
                     <tr className="text-left text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
                       <th className="py-2 pr-4">Date</th>
@@ -8126,8 +8138,9 @@ html, body, #root {
                       </tr>
                     ))}
                   </tbody>
-                </table>
-              </div>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
