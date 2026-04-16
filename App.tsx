@@ -726,8 +726,7 @@ const Drawer: React.FC<{ isOpen: boolean; onClose: () => void; title: string; ch
         style={{
           width: '100%',
           maxWidth: 'min(100%, 32rem)',
-          height: 'calc(var(--moniezi-app-vh, 1vh) * 100)',
-          maxHeight: 'calc(var(--moniezi-app-vh, 1vh) * 100)',
+          maxHeight: '100%',
         }}
       >
         <div
@@ -742,7 +741,7 @@ const Drawer: React.FC<{ isOpen: boolean; onClose: () => void; title: string; ch
         <div
           ref={scrollAreaRef}
           className="drawer-scroll-area px-4 sm:px-8 pb-8 modal-scroll-area custom-scrollbar"
-          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 2rem + var(--moniezi-keyboard-inset, 0px))' }}
+          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 2rem)' }}
         >
           {children}
         </div>
@@ -935,7 +934,7 @@ function pageToHashPath(page: Page): string {
   }
 }
 
-const CUSTOMER_VERSION = "28.0.0";
+const CUSTOMER_VERSION = "28.0.2";
 const LICENSE_STORAGE_KEY = "moniezi_license_v1";
 const DEVICE_ID_STORAGE_KEY = "moniezi_device_id_v1";
 const OWNER_LICENSE_KEY = "vgkey";
