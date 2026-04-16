@@ -657,8 +657,8 @@ const Drawer: React.FC<{ isOpen: boolean; onClose: () => void; title: string; ch
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   // Mobile keyboard handling for drawer inputs.
-  // Keep the focused field visible above the iPhone keyboard and preserve enough
-  // bottom space so later fields / save actions remain reachable.
+  // iPhone Safari is sensitive to repeated scroll corrections while the keyboard
+  // animates. Keep this to a single, non-animated sync per focus / resize cycle.
   useEffect(() => {
     if (!isOpen) return;
     const scrollArea = scrollAreaRef.current;
@@ -674,19 +674,20 @@ const Drawer: React.FC<{ isOpen: boolean; onClose: () => void; title: string; ch
       const viewportHeight = window.visualViewport?.height || window.innerHeight;
       const keyboardInset = Math.max(0, window.innerHeight - viewportHeight - (window.visualViewport?.offsetTop || 0));
       const visibleTop = scrollAreaRect.top + 12;
-      const visibleBottom = Math.min(scrollAreaRect.bottom, viewportHeight) - Math.max(24, keyboardInset > 0 ? 20 : 12);
+      const visibleBottom = Math.min(scrollAreaRect.bottom, viewportHeight) - Math.max(16, keyboardInset > 0 ? 14 : 12);
+
+      if (targetRect.top >= visibleTop && targetRect.bottom <= visibleBottom) return;
 
       const targetTopInScroll = scrollArea.scrollTop + (targetRect.top - scrollAreaRect.top);
-      const nextScrollTop = Math.max(0, targetTopInScroll - Math.max(24, scrollArea.clientHeight * 0.22));
+      const alignOffset = Math.max(20, Math.min(96, scrollArea.clientHeight * 0.18));
+      const nextScrollTop = Math.max(0, targetTopInScroll - alignOffset);
 
-      if (targetRect.top < visibleTop || targetRect.bottom > visibleBottom) {
-        scrollArea.scrollTo({ top: nextScrollTop, behavior: 'smooth' });
-      }
+      scrollArea.scrollTo({ top: nextScrollTop, behavior: 'auto' });
     };
 
-    const scheduleSync = (target: HTMLElement) => {
+    const scheduleSync = (target: HTMLElement, delay = 180) => {
       if (activeTimer) window.clearTimeout(activeTimer);
-      activeTimer = window.setTimeout(() => syncFocusedFieldIntoView(target), 320);
+      activeTimer = window.setTimeout(() => syncFocusedFieldIntoView(target), delay);
     };
 
     const handleFocusIn = (e: FocusEvent) => {
@@ -694,26 +695,24 @@ const Drawer: React.FC<{ isOpen: boolean; onClose: () => void; title: string; ch
       if (!target) return;
       const tag = target.tagName.toLowerCase();
       if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
-      scheduleSync(target);
+      scheduleSync(target, 220);
     };
 
-    const handleViewportChange = () => {
+    const handleViewportResize = () => {
       const active = document.activeElement as HTMLElement | null;
       if (!active || !scrollArea.contains(active)) return;
       const tag = active.tagName.toLowerCase();
       if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
-      scheduleSync(active);
+      scheduleSync(active, 60);
     };
 
     scrollArea.addEventListener('focusin', handleFocusIn, { passive: true });
-    window.visualViewport?.addEventListener('resize', handleViewportChange);
-    window.visualViewport?.addEventListener('scroll', handleViewportChange);
+    window.visualViewport?.addEventListener('resize', handleViewportResize);
 
     return () => {
       if (activeTimer) window.clearTimeout(activeTimer);
       scrollArea.removeEventListener('focusin', handleFocusIn);
-      window.visualViewport?.removeEventListener('resize', handleViewportChange);
-      window.visualViewport?.removeEventListener('scroll', handleViewportChange);
+      window.visualViewport?.removeEventListener('resize', handleViewportResize);
     };
   }, [isOpen]);
 
@@ -934,7 +933,7 @@ function pageToHashPath(page: Page): string {
   }
 }
 
-const CUSTOMER_VERSION = "28.0.2";
+const CUSTOMER_VERSION = "28.0.3";
 const LICENSE_STORAGE_KEY = "moniezi_license_v1";
 const DEVICE_ID_STORAGE_KEY = "moniezi_device_id_v1";
 const OWNER_LICENSE_KEY = "vgkey";
@@ -1052,7 +1051,6 @@ export default function App() {
       if (isAppleMobile) {
         document.documentElement.scrollLeft = 0;
         document.body.scrollLeft = 0;
-        window.scrollTo({ left: 0, top: window.scrollY, behavior: 'instant' as ScrollBehavior });
       }
     };
 
@@ -1060,13 +1058,11 @@ export default function App() {
     window.addEventListener('resize', updateViewportVars);
     window.addEventListener('orientationchange', updateViewportVars);
     window.visualViewport?.addEventListener('resize', updateViewportVars);
-    window.visualViewport?.addEventListener('scroll', updateViewportVars);
 
     return () => {
       window.removeEventListener('resize', updateViewportVars);
       window.removeEventListener('orientationchange', updateViewportVars);
       window.visualViewport?.removeEventListener('resize', updateViewportVars);
-      window.visualViewport?.removeEventListener('scroll', updateViewportVars);
     };
   }, []);
 
@@ -2104,18 +2100,20 @@ export default function App() {
       const viewportHeight = window.visualViewport?.height || window.innerHeight;
       const keyboardInset = Math.max(0, window.innerHeight - viewportHeight - (window.visualViewport?.offsetTop || 0));
       const visibleTop = scrollAreaRect.top + 12;
-      const visibleBottom = Math.min(scrollAreaRect.bottom, viewportHeight) - Math.max(24, keyboardInset > 0 ? 20 : 12);
-      const targetTopInScroll = scrollArea.scrollTop + (targetRect.top - scrollAreaRect.top);
-      const nextScrollTop = Math.max(0, targetTopInScroll - Math.max(24, scrollArea.clientHeight * 0.22));
+      const visibleBottom = Math.min(scrollAreaRect.bottom, viewportHeight) - Math.max(16, keyboardInset > 0 ? 14 : 12);
 
-      if (targetRect.top < visibleTop || targetRect.bottom > visibleBottom) {
-        scrollArea.scrollTo({ top: nextScrollTop, behavior: 'smooth' });
-      }
+      if (targetRect.top >= visibleTop && targetRect.bottom <= visibleBottom) return;
+
+      const targetTopInScroll = scrollArea.scrollTop + (targetRect.top - scrollAreaRect.top);
+      const alignOffset = Math.max(20, Math.min(96, scrollArea.clientHeight * 0.18));
+      const nextScrollTop = Math.max(0, targetTopInScroll - alignOffset);
+
+      scrollArea.scrollTo({ top: nextScrollTop, behavior: 'auto' });
     };
 
-    const scheduleSync = (target: HTMLElement) => {
+    const scheduleSync = (target: HTMLElement, delay = 180) => {
       if (activeTimer) window.clearTimeout(activeTimer);
-      activeTimer = window.setTimeout(() => syncFocusedFieldIntoView(target), 320);
+      activeTimer = window.setTimeout(() => syncFocusedFieldIntoView(target), delay);
     };
 
     const handleFocusIn = (e: FocusEvent) => {
@@ -2123,26 +2121,24 @@ export default function App() {
       if (!target) return;
       const tag = target.tagName.toLowerCase();
       if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
-      scheduleSync(target);
+      scheduleSync(target, 220);
     };
 
-    const handleViewportChange = () => {
+    const handleViewportResize = () => {
       const active = document.activeElement as HTMLElement | null;
       if (!active || !scrollArea.contains(active)) return;
       const tag = active.tagName.toLowerCase();
       if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
-      scheduleSync(active);
+      scheduleSync(active, 60);
     };
 
     scrollArea.addEventListener('focusin', handleFocusIn, { passive: true });
-    window.visualViewport?.addEventListener('resize', handleViewportChange);
-    window.visualViewport?.addEventListener('scroll', handleViewportChange);
+    window.visualViewport?.addEventListener('resize', handleViewportResize);
 
     return () => {
       if (activeTimer) window.clearTimeout(activeTimer);
       scrollArea.removeEventListener('focusin', handleFocusIn);
-      window.visualViewport?.removeEventListener('resize', handleViewportChange);
-      window.visualViewport?.removeEventListener('scroll', handleViewportChange);
+      window.visualViewport?.removeEventListener('resize', handleViewportResize);
     };
   }, [currentPage]); // re-attach when page changes since mainScrollRef changes via key
 
