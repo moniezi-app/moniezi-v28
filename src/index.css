@@ -61,10 +61,21 @@ body.modal-open {
 
 /* Scrollable content inside modals */
 .modal-scroll-area {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: clip;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+}
+
+.drawer-shell {
+  min-height: 0;
+}
+
+.drawer-scroll-area {
+  scroll-padding-top: 120px;
+  scroll-padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 120px);
 }
 
 /* Extreme-contrast light mode pass */

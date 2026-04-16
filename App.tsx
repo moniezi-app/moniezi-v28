@@ -656,52 +656,65 @@ const DateInput = ({ label, value, onChange }: { label: string, value: string, o
 const Drawer: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode }> = ({ isOpen, onClose, title, children }) => {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
-  const dismissKeyboardIfBackgroundTap = (e: React.PointerEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLElement | null;
-    if (!target) return;
-    if (target.closest('input, textarea, select, button, a, label, [role="button"], [data-keep-focus]')) return;
-
-    const active = document.activeElement as HTMLElement | null;
-    if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) {
-      active.blur();
-    }
-  };
-
-  // iOS keyboard scroll-into-view fix:
-  // When body is position:fixed (modal-open), iOS can't auto-scroll inputs into view.
-  // We manually scroll the drawer's scroll area so the focused input is visible.
+  // Mobile keyboard handling for drawer inputs.
+  // Keep the focused field visible above the iPhone keyboard and preserve enough
+  // bottom space so later fields / save actions remain reachable.
   useEffect(() => {
     if (!isOpen) return;
     const scrollArea = scrollAreaRef.current;
     if (!scrollArea) return;
 
-    const handleFocus = (e: FocusEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target || !('tagName' in target)) return;
-      const tag = target.tagName.toLowerCase();
-      if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+    let activeTimer: number | null = null;
 
-      // Delay slightly to let iOS finish opening the keyboard before measuring
-      window.setTimeout(() => {
-        if (!scrollArea.contains(target)) return;
+    const syncFocusedFieldIntoView = (target: HTMLElement) => {
+      if (!scrollArea.contains(target)) return;
 
-        const viewportHeight = window.visualViewport?.height || window.innerHeight;
-        const targetRect = target.getBoundingClientRect();
-        const scrollAreaRect = scrollArea.getBoundingClientRect();
+      const scrollAreaRect = scrollArea.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const keyboardInset = Math.max(0, window.innerHeight - viewportHeight - (window.visualViewport?.offsetTop || 0));
+      const visibleTop = scrollAreaRect.top + 12;
+      const visibleBottom = Math.min(scrollAreaRect.bottom, viewportHeight) - Math.max(24, keyboardInset > 0 ? 20 : 12);
 
-        const visibleTop = Math.max(scrollAreaRect.top + 16, 92);
-        const visibleBottom = Math.min(scrollAreaRect.bottom, viewportHeight) - 16;
+      const targetTopInScroll = scrollArea.scrollTop + (targetRect.top - scrollAreaRect.top);
+      const nextScrollTop = Math.max(0, targetTopInScroll - Math.max(24, scrollArea.clientHeight * 0.22));
 
-        if (targetRect.bottom > visibleBottom) {
-          scrollArea.scrollBy({ top: targetRect.bottom - visibleBottom, behavior: 'smooth' });
-        } else if (targetRect.top < visibleTop) {
-          scrollArea.scrollBy({ top: targetRect.top - visibleTop, behavior: 'smooth' });
-        }
-      }, 260);
+      if (targetRect.top < visibleTop || targetRect.bottom > visibleBottom) {
+        scrollArea.scrollTo({ top: nextScrollTop, behavior: 'smooth' });
+      }
     };
 
-    scrollArea.addEventListener('focusin', handleFocus, { passive: true });
-    return () => scrollArea.removeEventListener('focusin', handleFocus);
+    const scheduleSync = (target: HTMLElement) => {
+      if (activeTimer) window.clearTimeout(activeTimer);
+      activeTimer = window.setTimeout(() => syncFocusedFieldIntoView(target), 320);
+    };
+
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const tag = target.tagName.toLowerCase();
+      if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+      scheduleSync(target);
+    };
+
+    const handleViewportChange = () => {
+      const active = document.activeElement as HTMLElement | null;
+      if (!active || !scrollArea.contains(active)) return;
+      const tag = active.tagName.toLowerCase();
+      if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+      scheduleSync(active);
+    };
+
+    scrollArea.addEventListener('focusin', handleFocusIn, { passive: true });
+    window.visualViewport?.addEventListener('resize', handleViewportChange);
+    window.visualViewport?.addEventListener('scroll', handleViewportChange);
+
+    return () => {
+      if (activeTimer) window.clearTimeout(activeTimer);
+      scrollArea.removeEventListener('focusin', handleFocusIn);
+      window.visualViewport?.removeEventListener('resize', handleViewportChange);
+      window.visualViewport?.removeEventListener('scroll', handleViewportChange);
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -713,6 +726,7 @@ const Drawer: React.FC<{ isOpen: boolean; onClose: () => void; title: string; ch
         style={{
           width: '100%',
           maxWidth: 'min(100%, 32rem)',
+          height: 'calc(var(--moniezi-app-vh, 1vh) * 100)',
           maxHeight: 'calc(var(--moniezi-app-vh, 1vh) * 100)',
         }}
       >
@@ -727,7 +741,6 @@ const Drawer: React.FC<{ isOpen: boolean; onClose: () => void; title: string; ch
         </div>
         <div
           ref={scrollAreaRef}
-          onPointerDownCapture={dismissKeyboardIfBackgroundTap}
           className="drawer-scroll-area px-4 sm:px-8 pb-8 modal-scroll-area custom-scrollbar"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 2rem + var(--moniezi-keyboard-inset, 0px))' }}
         >
@@ -922,7 +935,7 @@ function pageToHashPath(page: Page): string {
   }
 }
 
-const CUSTOMER_VERSION = "1.0.0";
+const CUSTOMER_VERSION = "28.0.0";
 const LICENSE_STORAGE_KEY = "moniezi_license_v1";
 const DEVICE_ID_STORAGE_KEY = "moniezi_device_id_v1";
 const OWNER_LICENSE_KEY = "vgkey";
@@ -1024,36 +1037,18 @@ export default function App() {
 
     const updateViewportVars = () => {
       const vv = window.visualViewport;
-      const currentWindowHeight = window.innerHeight;
+      const layoutHeight = window.innerHeight;
+      const height = vv?.height || layoutHeight;
+      const offsetTop = vv?.offsetTop || 0;
+      const keyboardInset = Math.max(0, Math.round(layoutHeight - (height + offsetTop)));
 
-      if (!stableAppHeightRef.current) {
-        stableAppHeightRef.current = currentWindowHeight;
-      }
-
-      const visualHeight = vv?.height || currentWindowHeight;
-      const visualOffsetTop = vv?.offsetTop || 0;
-
-      let keyboardInset = isAppleMobile
-        ? Math.max(0, Math.round(stableAppHeightRef.current - (visualHeight + visualOffsetTop)))
-        : 0;
-
-      if (!isAppleMobile || keyboardInset < 120) {
-        stableAppHeightRef.current = currentWindowHeight;
-        keyboardInset = isAppleMobile
-          ? Math.max(0, Math.round(stableAppHeightRef.current - (visualHeight + visualOffsetTop)))
-          : 0;
-      }
-
-      const shellHeight = isAppleMobile ? stableAppHeightRef.current : currentWindowHeight;
-
-      document.documentElement.style.setProperty('--moniezi-app-vh', `${shellHeight * 0.01}px`);
+      document.documentElement.style.setProperty('--moniezi-app-vh', `${height * 0.01}px`);
+      document.documentElement.style.setProperty('--moniezi-layout-vh', `${layoutHeight * 0.01}px`);
       document.documentElement.style.setProperty('--moniezi-keyboard-inset', `${keyboardInset}px`);
       document.documentElement.style.setProperty(
         '--moniezi-ios-top-pad',
-        isAppleMobile ? `${Math.max(16, Math.round(visualOffsetTop + 16))}px` : '0px'
+        isAppleMobile ? `${Math.max(16, Math.round(offsetTop + 16))}px` : '0px'
       );
-
-      setIsVirtualKeyboardOpen(isAppleMobile && keyboardInset >= 120);
 
       if (isAppleMobile) {
         document.documentElement.scrollLeft = 0;
@@ -1193,8 +1188,6 @@ export default function App() {
   const [showIosInstallCta, setShowIosInstallCta] = useState(false);
   const [showIosInstallHelp, setShowIosInstallHelp] = useState(false);
   const [isRunningStandalone, setIsRunningStandalone] = useState(false);
-  const [isVirtualKeyboardOpen, setIsVirtualKeyboardOpen] = useState(false);
-  const stableAppHeightRef = useRef(typeof window !== 'undefined' ? window.innerHeight : 0);
 
   const getIosInstallContext = useCallback(() => {
     try {
@@ -1236,17 +1229,6 @@ export default function App() {
 
   const openIosInstallHelp = useCallback(() => {
     setShowIosInstallHelp(true);
-  }, []);
-
-  const dismissKeyboardIfBackgroundTap = useCallback((e: React.PointerEvent<HTMLElement>) => {
-    const target = e.target as HTMLElement | null;
-    if (!target) return;
-    if (target.closest('input, textarea, select, button, a, label, [role="button"], [data-keep-focus]')) return;
-
-    const active = document.activeElement as HTMLElement | null;
-    if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) {
-      active.blur();
-    }
   }, []);
 
   // Always reset scroll position when switching bottom tabs.
@@ -2107,39 +2089,62 @@ export default function App() {
     if (showInsights) { lockBodyScroll(); return () => { unlockBodyScroll(); }; }
   }, [showInsights, lockBodyScroll, unlockBodyScroll]);
 
-  // iOS keyboard scroll-into-view fix for the MAIN scroll area
+  // Mobile keyboard handling for the main scroll area
   // (Mileage page, Settings, etc. — inputs not inside the Drawer)
-  // When body is position:fixed, iOS can't auto-scroll inputs into view.
   useEffect(() => {
     const scrollArea = mainScrollRef.current;
     if (!scrollArea) return;
 
-    const handleFocus = (e: FocusEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target || !('tagName' in target)) return;
-      const tag = target.tagName.toLowerCase();
-      if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+    let activeTimer: number | null = null;
 
-      // Delay slightly so iOS finishes the keyboard animation before we measure
-      window.setTimeout(() => {
-        if (!scrollArea.contains(target)) return;
+    const syncFocusedFieldIntoView = (target: HTMLElement) => {
+      if (!scrollArea.contains(target)) return;
 
-        const viewportHeight = window.visualViewport?.height || window.innerHeight;
-        const targetRect = target.getBoundingClientRect();
-        const scrollAreaRect = scrollArea.getBoundingClientRect();
-        const visibleTop = Math.max(scrollAreaRect.top + 16, 92);
-        const visibleBottom = Math.min(scrollAreaRect.bottom, viewportHeight) - 16;
+      const scrollAreaRect = scrollArea.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const keyboardInset = Math.max(0, window.innerHeight - viewportHeight - (window.visualViewport?.offsetTop || 0));
+      const visibleTop = scrollAreaRect.top + 12;
+      const visibleBottom = Math.min(scrollAreaRect.bottom, viewportHeight) - Math.max(24, keyboardInset > 0 ? 20 : 12);
+      const targetTopInScroll = scrollArea.scrollTop + (targetRect.top - scrollAreaRect.top);
+      const nextScrollTop = Math.max(0, targetTopInScroll - Math.max(24, scrollArea.clientHeight * 0.22));
 
-        if (targetRect.bottom > visibleBottom) {
-          scrollArea.scrollBy({ top: targetRect.bottom - visibleBottom, behavior: 'smooth' });
-        } else if (targetRect.top < visibleTop) {
-          scrollArea.scrollBy({ top: targetRect.top - visibleTop, behavior: 'smooth' });
-        }
-      }, 260);
+      if (targetRect.top < visibleTop || targetRect.bottom > visibleBottom) {
+        scrollArea.scrollTo({ top: nextScrollTop, behavior: 'smooth' });
+      }
     };
 
-    scrollArea.addEventListener('focusin', handleFocus, { passive: true });
-    return () => scrollArea.removeEventListener('focusin', handleFocus);
+    const scheduleSync = (target: HTMLElement) => {
+      if (activeTimer) window.clearTimeout(activeTimer);
+      activeTimer = window.setTimeout(() => syncFocusedFieldIntoView(target), 320);
+    };
+
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const tag = target.tagName.toLowerCase();
+      if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+      scheduleSync(target);
+    };
+
+    const handleViewportChange = () => {
+      const active = document.activeElement as HTMLElement | null;
+      if (!active || !scrollArea.contains(active)) return;
+      const tag = active.tagName.toLowerCase();
+      if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+      scheduleSync(active);
+    };
+
+    scrollArea.addEventListener('focusin', handleFocusIn, { passive: true });
+    window.visualViewport?.addEventListener('resize', handleViewportChange);
+    window.visualViewport?.addEventListener('scroll', handleViewportChange);
+
+    return () => {
+      if (activeTimer) window.clearTimeout(activeTimer);
+      scrollArea.removeEventListener('focusin', handleFocusIn);
+      window.visualViewport?.removeEventListener('resize', handleViewportChange);
+      window.visualViewport?.removeEventListener('scroll', handleViewportChange);
+    };
   }, [currentPage]); // re-attach when page changes since mainScrollRef changes via key
 
   const findMatchingClientId = useCallback((data: Partial<Invoice> & Partial<Estimate>) => {
@@ -7165,14 +7170,7 @@ html, body, #root {
         </div>
       </header>
 
-      <div
-        key={`main-scroll-${currentPage}`}
-        ref={mainScrollRef}
-        onPointerDownCapture={dismissKeyboardIfBackgroundTap}
-        className="main-scroll-lock flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 md:px-8 pt-5 sm:pt-6 md:pt-7 no-print custom-scrollbar"
-        style={{ paddingBottom: 'calc(11rem + env(safe-area-inset-bottom, 0px) + var(--moniezi-keyboard-inset, 0px))' }}
-        role="main"
-      >
+      <div key={`main-scroll-${currentPage}`} ref={mainScrollRef} className="main-scroll-lock flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 md:px-8 pt-5 sm:pt-6 md:pt-7 no-print custom-scrollbar" style={{ paddingBottom: 'calc(11rem + env(safe-area-inset-bottom, 0px))' }} role="main">
 
       <PageErrorBoundary key={currentPage} onReset={() => setCurrentPage(Page.Dashboard)}>
 
@@ -8049,7 +8047,7 @@ html, body, #root {
                 </div>
                 <div className="md:col-span-1">
                   <label className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-2 block">Miles</label>
-                  <input type="number" value={newTrip.miles} onChange={e => setNewTrip((p: any) => ({ ...p, miles: e.target.value }))} onBlur={e => setNewTrip((p: any) => ({ ...p, miles: normalizeMileageDraftMiles(e.target.value) }))} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-sm font-bold" placeholder="0" />
+                  <input type="number" inputMode="decimal" enterKeyHint="done" step="0.1" value={newTrip.miles} onChange={e => setNewTrip((p: any) => ({ ...p, miles: e.target.value }))} onBlur={e => setNewTrip((p: any) => ({ ...p, miles: normalizeMileageDraftMiles(e.target.value) }))} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-sm font-bold" placeholder="0" />
                 </div>
                 <div className="md:col-span-3">
                   <label className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-2 block">Purpose</label>
@@ -8091,7 +8089,7 @@ html, body, #root {
                           <input type="date" value={trip.date} onChange={e => updateMileageTrip(trip.id, { date: e.target.value })} className="bg-transparent border border-slate-200 dark:border-slate-800 rounded-md px-2 py-1 text-sm font-bold" />
                         </td>
                         <td className="py-2 pr-4">
-                          <input type="number" value={trip.miles} onChange={e => updateMileageTrip(trip.id, { miles: Number(e.target.value) })} className="w-24 bg-transparent border border-slate-200 dark:border-slate-800 rounded-md px-2 py-1 text-sm font-bold" />
+                          <input type="number" inputMode="decimal" enterKeyHint="done" step="0.1" value={trip.miles} onChange={e => updateMileageTrip(trip.id, { miles: Number(e.target.value) })} className="w-24 bg-transparent border border-slate-200 dark:border-slate-800 rounded-md px-2 py-1 text-sm font-bold" />
                         </td>
                         <td className="py-2 pr-4">
                           <input type="text" value={trip.purpose} onChange={e => updateMileageTrip(trip.id, { purpose: e.target.value })} className="w-64 bg-transparent border border-slate-200 dark:border-slate-800 rounded-md px-2 py-1 text-sm font-bold" />
@@ -8477,7 +8475,7 @@ html, body, #root {
                     </div>
                     <div className="md:col-span-1">
                       <label className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-2 block">Miles</label>
-                      <input type="number" value={newTrip.miles} onChange={e => setNewTrip((p: any) => ({ ...p, miles: e.target.value }))} onBlur={e => setNewTrip((p: any) => ({ ...p, miles: normalizeMileageDraftMiles(e.target.value) }))} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-sm font-bold" />
+                      <input type="number" inputMode="decimal" enterKeyHint="done" step="0.1" value={newTrip.miles} onChange={e => setNewTrip((p: any) => ({ ...p, miles: e.target.value }))} onBlur={e => setNewTrip((p: any) => ({ ...p, miles: normalizeMileageDraftMiles(e.target.value) }))} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-sm font-bold" />
                     </div>
                     <div className="md:col-span-3">
                       <label className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-2 block">Purpose</label>
@@ -8519,7 +8517,7 @@ html, body, #root {
                               <input type="date" value={trip.date} onChange={e => updateMileageTrip(trip.id, { date: e.target.value })} className="bg-transparent border border-slate-200 dark:border-slate-800 rounded-md px-2 py-1 text-sm font-bold" />
                             </td>
                             <td className="py-2 pr-4">
-                              <input type="number" value={trip.miles} onChange={e => updateMileageTrip(trip.id, { miles: Number(e.target.value) })} className="w-24 bg-transparent border border-slate-200 dark:border-slate-800 rounded-md px-2 py-1 text-sm font-bold" />
+                              <input type="number" inputMode="decimal" enterKeyHint="done" step="0.1" value={trip.miles} onChange={e => updateMileageTrip(trip.id, { miles: Number(e.target.value) })} className="w-24 bg-transparent border border-slate-200 dark:border-slate-800 rounded-md px-2 py-1 text-sm font-bold" />
                             </td>
                             <td className="py-2 pr-4">
                               <input type="text" value={trip.purpose} onChange={e => updateMileageTrip(trip.id, { purpose: e.target.value })} className="w-64 bg-transparent border border-slate-200 dark:border-slate-800 rounded-md px-2 py-1 text-sm font-bold" />
@@ -10438,7 +10436,7 @@ html, body, #root {
       </div>
 
       {/* Scroll to Top Button - rendered via Portal to escape overflow-hidden container */}
-      {showScrollToTop && !isVirtualKeyboardOpen && createPortal(
+      {showScrollToTop && createPortal(
         <button
           onClick={scrollToTop}
           className="no-print w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg shadow-slate-900/10 dark:shadow-black/30 hover:shadow-xl hover:scale-105"
@@ -10545,7 +10543,6 @@ html, body, #root {
         </div>
       )}
 
-      {!isVirtualKeyboardOpen && (
       <div className="dark-chrome no-print fixed bottom-0 left-0 right-0 z-[55] pb-safe">
         <div className={`${useDarkChrome ? 'bg-slate-950 border-t border-slate-800/50' : 'bg-white/95 dark:bg-slate-950/95 border-t border-slate-200 dark:border-slate-800/50'} ${useDarkChrome ? '' : 'backdrop-blur-xl'} px-1 pt-2 pb-3`}>
           <div className="max-w-xl mx-auto flex justify-between items-end relative">
@@ -10635,7 +10632,6 @@ html, body, #root {
           </div>
         </div>
       </div>
-      )}
       
 
       {/* Insights Modal */}
@@ -10865,7 +10861,7 @@ html, body, #root {
                         </div>
                       )}
                       <div><label className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-2 block pl-1">Description</label><input type="text" value={activeItem.name || ''} onChange={e => setActiveItem(prev => ({ ...prev, name: e.target.value }))} className="w-full bg-transparent border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-4 font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500/20" placeholder={activeTab === 'income' ? "Client or Source" : "Vendor or Purchase"} /></div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><DateInput label="Date" value={activeItem.date || ''} onChange={v => setActiveItem(prev => ({ ...prev, date: v }))} /><div><label className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-2 block pl-1">Amount</label><div className="relative"><span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 dark:text-slate-300 font-bold">{settings.currencySymbol}</span><input type="number" value={activeItem.amount || ''} onChange={e => setActiveItem(prev => ({ ...prev, amount: Number(e.target.value) }))} className="w-full bg-transparent border border-slate-300 dark:border-slate-700 rounded-lg pl-10 pr-4 py-4 font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500/20" placeholder="0.00" /></div></div></div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><DateInput label="Date" value={activeItem.date || ''} onChange={v => setActiveItem(prev => ({ ...prev, date: v }))} /><div><label className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-2 block pl-1">Amount</label><div className="relative"><span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 dark:text-slate-300 font-bold">{settings.currencySymbol}</span><input type="number" inputMode="decimal" enterKeyHint="done" step="0.01" value={activeItem.amount || ''} onChange={e => setActiveItem(prev => ({ ...prev, amount: Number(e.target.value) }))} className="w-full bg-transparent border border-slate-300 dark:border-slate-700 rounded-lg pl-10 pr-4 py-4 font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500/20" placeholder="0.00" /></div></div></div>
                       <div><label className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-2 block pl-1">Category</label>{renderCategoryChips(activeItem.category, (cat) => setActiveItem(prev => ({ ...prev, category: cat })))}</div>
                       {activeTab === 'expense' && (
                         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-4">
