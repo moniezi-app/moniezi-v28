@@ -933,7 +933,7 @@ function pageToHashPath(page: Page): string {
   }
 }
 
-const CUSTOMER_VERSION = "28.0.4"; // GitHub test upload marker: v28.0.4
+const CUSTOMER_VERSION = "28.0.5"; // GitHub test upload marker: v28.0.5
 const LICENSE_STORAGE_KEY = "moniezi_license_v1";
 const DEVICE_ID_STORAGE_KEY = "moniezi_device_id_v1";
 const OWNER_LICENSE_KEY = "vgkey";
@@ -1033,6 +1033,15 @@ export default function App() {
   useEffect(() => {
     const isAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
+    const isTextEditingElement = (el: Element | null) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'textarea' || tag === 'select') return true;
+      if (tag !== 'input') return false;
+      const type = (el.getAttribute('type') || 'text').toLowerCase();
+      return !['button', 'checkbox', 'radio', 'range', 'file', 'submit', 'reset', 'color'].includes(type);
+    };
+
     const updateViewportVars = () => {
       const vv = window.visualViewport;
       const layoutHeight = window.innerHeight;
@@ -1048,21 +1057,36 @@ export default function App() {
         isAppleMobile ? `${Math.max(16, Math.round(offsetTop + 16))}px` : '0px'
       );
 
+      const editing = isAppleMobile && keyboardInset > 120 && isTextEditingElement(document.activeElement);
+      setIsKeyboardEditing(editing);
+      document.documentElement.classList.toggle('moniezi-keyboard-editing', editing);
+      document.body.classList.toggle('moniezi-keyboard-editing', editing);
+
       if (isAppleMobile) {
         document.documentElement.scrollLeft = 0;
         document.body.scrollLeft = 0;
       }
     };
 
+    const handleFocusState = () => {
+      window.setTimeout(updateViewportVars, 40);
+    };
+
     updateViewportVars();
     window.addEventListener('resize', updateViewportVars);
     window.addEventListener('orientationchange', updateViewportVars);
+    window.addEventListener('focusin', handleFocusState);
+    window.addEventListener('focusout', handleFocusState);
     window.visualViewport?.addEventListener('resize', updateViewportVars);
 
     return () => {
       window.removeEventListener('resize', updateViewportVars);
       window.removeEventListener('orientationchange', updateViewportVars);
+      window.removeEventListener('focusin', handleFocusState);
+      window.removeEventListener('focusout', handleFocusState);
       window.visualViewport?.removeEventListener('resize', updateViewportVars);
+      document.documentElement.classList.remove('moniezi-keyboard-editing');
+      document.body.classList.remove('moniezi-keyboard-editing');
     };
   }, []);
 
@@ -1178,6 +1202,7 @@ export default function App() {
   // bottom nav keeps the previous scroll position.
   const mainScrollRef = useRef<HTMLDivElement>(null);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
+  const [isKeyboardEditing, setIsKeyboardEditing] = useState(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
   const [showDeferredInstallCta, setShowDeferredInstallCta] = useState(false);
   const [showIosInstallCta, setShowIosInstallCta] = useState(false);
@@ -7142,7 +7167,7 @@ html, body, #root {
       )}
 
       <header 
-        className={`dark-chrome no-print flex items-center justify-between px-4 sm:px-6 md:px-8 pb-4 sm:pb-6 sticky top-0 backdrop-blur-xl z-50 transition-colors duration-300 ${useDarkChrome ? 'bg-slate-950 border-b border-slate-800' : 'bg-slatebg/90 dark:bg-slate-950/90 border-b border-slate-200 dark:border-slate-800'}`}
+        className={`dark-chrome no-print flex items-center justify-between px-4 sm:px-6 md:px-8 pb-4 sm:pb-6 sticky top-0 backdrop-blur-xl z-50 transition-colors duration-300 ${isKeyboardEditing ? 'opacity-0 pointer-events-none' : 'opacity-100'} ${useDarkChrome ? 'bg-slate-950 border-b border-slate-800' : 'bg-slatebg/90 dark:bg-slate-950/90 border-b border-slate-200 dark:border-slate-800'}`}
         style={{ paddingTop: 'max(1rem, calc(env(safe-area-inset-top, 0px) + var(--moniezi-ios-top-pad, 0px)))' }}
       >
         <Logo onClick={() => setCurrentPage(Page.Dashboard)} onDarkSurface={useDarkChrome} />
@@ -7165,7 +7190,7 @@ html, body, #root {
         </div>
       </header>
 
-      <div key={`main-scroll-${currentPage}`} ref={mainScrollRef} className="main-scroll-lock flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 md:px-8 pt-5 sm:pt-6 md:pt-7 no-print custom-scrollbar" style={{ paddingBottom: 'calc(11rem + env(safe-area-inset-bottom, 0px))' }} role="main">
+      <div key={`main-scroll-${currentPage}`} ref={mainScrollRef} className="main-scroll-lock flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 md:px-8 pt-5 sm:pt-6 md:pt-7 no-print custom-scrollbar" style={{ paddingBottom: isKeyboardEditing ? 'calc(env(safe-area-inset-bottom, 0px) + 1rem)' : 'calc(11rem + env(safe-area-inset-bottom, 0px))' }} role="main">
 
       <PageErrorBoundary key={currentPage} onReset={() => setCurrentPage(Page.Dashboard)}>
 
@@ -8002,7 +8027,7 @@ html, body, #root {
         )}
 
         {currentPage === Page.Mileage && (
-          <div className="space-y-8 animate-in fade-in slide-in-from-right-4">
+          <div className="min-h-full flex flex-col space-y-8 animate-in fade-in slide-in-from-right-4">
             <div className="flex items-center gap-2 sm:gap-3">
               <div className="p-2 sm:p-2.5 rounded-lg bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300 flex-shrink-0">
                 <Car size={20} className="sm:w-6 sm:h-6" strokeWidth={1.5} />
@@ -8015,7 +8040,7 @@ html, body, #root {
             </p>
 
             {/* Mileage Tracker (promoted to its own bottom-tab page) */}
-            <div className="bg-white dark:bg-slate-950 p-5 sm:p-8 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xl">
+            <div className="flex-1 min-h-0 bg-white dark:bg-slate-950 p-5 sm:p-8 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xl">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div>
                   <h3 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white">Mileage</h3>
@@ -10431,7 +10456,7 @@ html, body, #root {
       </div>
 
       {/* Scroll to Top Button - rendered via Portal to escape overflow-hidden container */}
-      {showScrollToTop && createPortal(
+      {showScrollToTop && !isKeyboardEditing && createPortal(
         <button
           onClick={scrollToTop}
           className="no-print w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg shadow-slate-900/10 dark:shadow-black/30 hover:shadow-xl hover:scale-105"
@@ -10538,7 +10563,7 @@ html, body, #root {
         </div>
       )}
 
-      <div className="dark-chrome no-print fixed bottom-0 left-0 right-0 z-[55] pb-safe">
+      <div className={`dark-chrome no-print fixed bottom-0 left-0 right-0 z-[55] pb-safe transition-opacity duration-150 ${isKeyboardEditing ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <div className={`${useDarkChrome ? 'bg-slate-950 border-t border-slate-800/50' : 'bg-white/95 dark:bg-slate-950/95 border-t border-slate-200 dark:border-slate-800/50'} ${useDarkChrome ? '' : 'backdrop-blur-xl'} px-1 pt-2 pb-3`}>
           <div className="max-w-xl mx-auto flex justify-between items-end relative">
             {/* Home */}
